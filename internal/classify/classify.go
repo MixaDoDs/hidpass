@@ -1,6 +1,9 @@
 package classify
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 const (
 	Other      = "other-hid"
@@ -36,21 +39,34 @@ func Classify(e Evidence) string {
 	if (e.VID == "0fd9" && strings.Contains(name, "stream")) || strings.Contains(name, "stream deck") || strings.Contains(name, "stream_deck") {
 		return StreamDeck
 	}
-	if yes(p, "ID_INPUT_TOUCHPAD") || ((has(e.AbsBits, 0) && has(e.AbsBits, 1)) && (has(e.KeyBits, 0x14a) || has(e.PropBits, 2))) {
+	// udev's own verdict, when it has one, beats every bitmap guess below.
+	for _, c := range []struct{ property, category string }{
+		{"ID_INPUT_TOUCHPAD", Touchpad}, {"ID_INPUT_TABLET", Tablet},
+		{"ID_INPUT_JOYSTICK", Joystick}, {"ID_INPUT_KEYBOARD", Keyboard},
+		{"ID_INPUT_MOUSE", Mouse},
+	} {
+		if yes(p, c.property) {
+			return c.category
+		}
+	}
+	pointer := has(e.AbsBits, 0) && has(e.AbsBits, 1) // ABS_X and ABS_Y
+	switch {
+	// INPUT_PROP_BUTTONPAD is the only touchpad-specific signal. BTN_TOUCH is
+	// shared with touchscreens, digitizers and touch-surface gamepads, so it
+	// decides only after the pen and gamepad buttons have been ruled out.
+	case pointer && has(e.PropBits, 2):
 		return Touchpad
-	}
-	if yes(p, "ID_INPUT_TABLET") || (has(e.KeyBits, 0x140) && has(e.AbsBits, 0) && has(e.AbsBits, 1)) {
+	case pointer && has(e.KeyBits, 0x140): // BTN_TOOL_PEN
 		return Tablet
-	}
-	if yes(p, "ID_INPUT_JOYSTICK") || (has(e.KeyBits, 0x130) && has(e.AbsBits, 0) && has(e.AbsBits, 1)) {
+	case pointer && has(e.KeyBits, 0x130): // BTN_GAMEPAD
 		return Joystick
-	}
-	// Alphabetic keys (KEY_Q and KEY_P) distinguish keyboards from mice,
-	// which also expose a key bitmap for their buttons.
-	if yes(p, "ID_INPUT_KEYBOARD") || (has(e.KeyBits, 16) && has(e.KeyBits, 25)) {
+	case pointer && has(e.KeyBits, 0x14a): // BTN_TOUCH
+		return Touchpad
+	// Alphabetic keys (KEY_Q and KEY_P) distinguish keyboards from mice, which
+	// also expose a key bitmap for their buttons.
+	case has(e.KeyBits, 16) && has(e.KeyBits, 25):
 		return Keyboard
-	}
-	if yes(p, "ID_INPUT_MOUSE") || (has(e.RelBits, 0) && has(e.RelBits, 1) && has(e.KeyBits, 0x110)) {
+	case has(e.RelBits, 0) && has(e.RelBits, 1) && has(e.KeyBits, 0x110): // BTN_LEFT
 		return Mouse
 	}
 	return Other
@@ -61,35 +77,27 @@ func yes(m map[string]string, key string) bool {
 	return v == "1" || v == "yes" || v == "true"
 }
 
-// has decodes Linux sysfs input bitmaps. Words are printed most-significant
-// first, while bit zero is in the right-most machine word. Parsing each word
-// independently also works on both 32-bit and 64-bit kernels.
+// has decodes Linux sysfs input capability bitmaps. The kernel prints one
+// machine word per space-separated field with %lx (so a word is *not*
+// zero-padded), most-significant word first, which puts bit zero in the
+// right-most field. A 32-bit process reads the kernel's compat format, whose
+// fields are 32-bit, so strconv.IntSize is the correct word width either way.
 func has(bitmaps []string, bit int) bool {
+	if bit < 0 {
+		return false
+	}
 	for _, bitmap := range bitmaps {
 		fields := strings.Fields(bitmap)
-		remaining := bit
-		for i := len(fields) - 1; i >= 0; i-- {
-			wordBits := len(fields[i]) * 4
-			if remaining < wordBits {
-				nibbleFromRight := remaining / 4
-				char := fields[i][len(fields[i])-1-nibbleFromRight]
-				var value byte
-				switch {
-				case char >= '0' && char <= '9':
-					value = char - '0'
-				case char >= 'a' && char <= 'f':
-					value = char - 'a' + 10
-				case char >= 'A' && char <= 'F':
-					value = char - 'A' + 10
-				default:
-					break
-				}
-				if value&(1<<uint(remaining%4)) != 0 {
-					return true
-				}
-				break
-			}
-			remaining -= wordBits
+		i := len(fields) - 1 - bit/strconv.IntSize
+		if i < 0 {
+			continue
+		}
+		word, err := strconv.ParseUint(fields[i], 16, 64)
+		if err != nil {
+			continue
+		}
+		if word&(1<<uint(bit%strconv.IntSize)) != 0 {
+			return true
 		}
 	}
 	return false

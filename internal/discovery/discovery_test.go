@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -205,31 +206,20 @@ func TestRegressionDoesNotWalkSysBusUSBDeviceSymlinks(t *testing.T) {
 	}
 }
 
+// bitmap renders bits the way the kernel does: one machine word per
+// space-separated field, %lx (unpadded), most-significant word first.
 func bitmap(bits ...int) string {
-	max := 0
+	words := []uint64{0}
 	for _, b := range bits {
-		if b > max {
-			max = b
+		i := b / strconv.IntSize
+		for len(words) <= i {
+			words = append(words, 0)
 		}
+		words[i] |= 1 << uint(b%strconv.IntSize)
 	}
-	chars := make([]byte, max/4+1)
-	for i := range chars {
-		chars[i] = '0'
+	fields := make([]string, 0, len(words))
+	for i := len(words) - 1; i >= 0; i-- {
+		fields = append(fields, strconv.FormatUint(words[i], 16))
 	}
-	for _, b := range bits {
-		i := len(chars) - 1 - b/4
-		v := byte(0)
-		if chars[i] <= '9' {
-			v = chars[i] - '0'
-		} else {
-			v = chars[i] - 'a' + 10
-		}
-		v |= 1 << uint(b%4)
-		if v < 10 {
-			chars[i] = '0' + v
-		} else {
-			chars[i] = 'a' + v - 10
-		}
-	}
-	return string(chars)
+	return strings.Join(fields, " ")
 }
