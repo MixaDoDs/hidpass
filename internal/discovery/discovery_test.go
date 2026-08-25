@@ -223,3 +223,57 @@ func bitmap(bits ...int) string {
 	}
 	return strings.Join(fields, " ")
 }
+
+// Regression: every DEVPATH starts with a PCI address such as pci0000:00, so
+// matching a bare ":" reduced the dedup key to "/devices" for the whole
+// machine and merged two identical devices plugged into different ports.
+func TestPhysicalKeyIgnoresPCIAddresses(t *testing.T) {
+	const prefix = "/devices/pci0000:00/0000:00:02.1/0000:0e:00.0/usb1"
+	got := physicalKey(prefix + "/1-6/1-6:1.0/0003:0DB0:0076.0001/hidraw/hidraw0")
+	if got != prefix+"/1-6" {
+		t.Fatalf("physicalKey = %q", got)
+	}
+	other := physicalKey(prefix + "/1-5/1-5.2/1-5.2:1.1/0003:25A7:FA7C.0004/hidraw/hidraw3")
+	if other == got {
+		t.Fatalf("different ports collapsed to %q", got)
+	}
+}
+
+// Regression: udev's hidraw rules import usb_id whenever any ancestor is USB,
+// so a Bluetooth HID reports ID_BUS=usb and the dongle's VID:PID. Granting
+// that ID would cover every device paired to the same adapter.
+func TestBluetoothHIDIsNotAttributedToItsUSBAdapter(t *testing.T) {
+	f := newFixture(t)
+	hid := filepath.Join(f.devices, "usb1", "1-7", "1-7:1.0", "bluetooth", "hci0", "hci0:70", "0005:046D:B023.000A")
+	hidraw := filepath.Join(hid, "hidraw", "hidraw8")
+	if err := os.MkdirAll(hidraw, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]string{"idVendor": "8087", "idProduct": "0029", "product": "Intel AX200 Bluetooth"} {
+		if err := os.WriteFile(filepath.Join(f.devices, "usb1", "1-7", name), []byte(value+"\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(hid, filepath.Join(hidraw, "device")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(hidraw, filepath.Join(f.class, "hidraw8")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.dev, "hidraw8"), nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeRunner{properties: map[string]string{
+		filepath.Join(f.dev, "hidraw8"): "ID_BUS=usb\nID_VENDOR_ID=8087\nID_MODEL_ID=0029\n",
+	}, errors: map[string]error{}}
+	r, err := f.scanner(runner).Scan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Devices) != 0 {
+		t.Fatalf("Bluetooth device offered as %#v", r.Devices)
+	}
+	if len(r.Diagnostics) != 1 || !strings.Contains(r.Diagnostics[0], "bluetooth") {
+		t.Fatalf("diagnostics %#v", r.Diagnostics)
+	}
+}
