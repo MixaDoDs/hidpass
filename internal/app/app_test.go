@@ -75,7 +75,7 @@ func TestPrivilegedAddWritesStateRulesAndReloads(t *testing.T) {
 	if err != nil || !strings.Contains(string(b), `TAG+="uaccess"`) {
 		t.Fatalf("rules %q err %v", b, err)
 	}
-	if len(calls) != 2 || !strings.Contains(calls[0], "--reload-rules") || !strings.HasSuffix(calls[1], "trigger") {
+	if len(calls) != 2 || !strings.Contains(calls[0], "--reload-rules") || !strings.Contains(calls[1], "trigger --subsystem-match=hidraw") {
 		t.Fatalf("calls %#v", calls)
 	}
 	if !strings.Contains(out.String(), "physically reconnect") {
@@ -107,4 +107,85 @@ func TestExplicitSudoInvocationRunsInProcess(t *testing.T) {
 	if !strings.Contains(out.String(), "started as root") {
 		t.Fatalf("missing root warning: %s", out.String())
 	}
+}
+
+// Regression: an empty line is the [Y/n] default, but a closed stdin is not an
+// answer. `hidpass auto </dev/null` used to allow every device unprompted.
+func TestAutoRefusesToGrantWithoutAnAnswer(t *testing.T) {
+	a, out := testApp(t)
+	dev := t.TempDir()
+	for _, n := range []string{"hidraw0", "hidraw1"} {
+		if err := os.WriteFile(filepath.Join(dev, n), nil, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.Scanner = discovery.New(discovery.Config{DevGlob: filepath.Join(dev, "hidraw*"), SysClass: t.TempDir(), Runner: idRunner{}})
+	a.Escalator.Run = func(name string, args ...string) error {
+		t.Fatalf("elevated without confirmation: %s %v", name, args)
+		return nil
+	}
+	err := a.Run([]string{"auto"})
+	if err == nil || !strings.Contains(err.Error(), "before an answer") {
+		t.Fatalf("error = %v, output:\n%s", err, out.String())
+	}
+}
+
+// idRunner reports one distinct USB mouse per hidraw node.
+type idRunner struct{}
+
+func (idRunner) Run(name string, args ...string) ([]byte, error) {
+	pid := "001e"
+	if strings.HasSuffix(args[len(args)-1], "hidraw1") {
+		pid = "002f"
+	}
+	return []byte("ID_BUS=usb\nID_VENDOR_ID=373e\nID_MODEL_ID=" + pid + "\nID_INPUT_MOUSE=1\n"), nil
+}
+
+func TestSubcommandHelpIsNotAnError(t *testing.T) {
+	a, out := testApp(t)
+	if err := a.Run([]string{"scan", "--help"}); err != nil {
+		t.Fatalf("scan --help = %v", err)
+	}
+	if !strings.Contains(out.String(), "-debug") {
+		t.Fatalf("usage not printed: %s", out.String())
+	}
+}
+
+func TestAutoAsksOncePerVIDPIDAndHonoursTheAnswer(t *testing.T) {
+	for _, tt := range []struct {
+		answer  string
+		granted bool
+	}{{"n\n", false}, {"y\n", true}, {"\n", true}} {
+		t.Run(strings.TrimSpace(tt.answer)+"/", func(t *testing.T) {
+			a, out := testApp(t)
+			dev := t.TempDir()
+			// Two nodes, one VID:PID: one rule covers both, so one question.
+			for _, n := range []string{"hidraw0", "hidraw1"} {
+				if err := os.WriteFile(filepath.Join(dev, n), nil, 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			a.Scanner = discovery.New(discovery.Config{DevGlob: filepath.Join(dev, "hidraw*"), SysClass: t.TempDir(), Runner: sameIDRunner{}})
+			a.In = strings.NewReader(tt.answer)
+			granted := false
+			a.Escalator.Run = func(string, ...string) error { granted = true; return nil }
+			if err := a.Run([]string{"auto"}); err != nil {
+				t.Fatal(err)
+			}
+			if granted != tt.granted {
+				t.Fatalf("answer %q granted=%v, output:\n%s", tt.answer, granted, out.String())
+			}
+			if n := strings.Count(out.String(), "Allow "); n != 1 {
+				t.Fatalf("asked %d times for one VID:PID:\n%s", n, out.String())
+			}
+		})
+	}
+}
+
+// sameIDRunner reports the same USB mouse on every hidraw node, as a device
+// with two hidraw interfaces but no readable sysfs parent does.
+type sameIDRunner struct{}
+
+func (sameIDRunner) Run(string, ...string) ([]byte, error) {
+	return []byte("ID_BUS=usb\nID_VENDOR_ID=373e\nID_MODEL_ID=001e\nID_INPUT_MOUSE=1\n"), nil
 }

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -52,6 +53,7 @@ type NodeReport struct {
 	ClassLink      string
 	ResolvedDevice string
 	USBParent      string
+	HIDBus         string
 	FallbackUsed   bool
 	FallbackError  string
 	VID            string
@@ -128,6 +130,14 @@ func (s *Scanner) Scan() (Result, error) {
 			result.Diagnostics = append(result.Diagnostics, fmt.Sprintf("Skipping %s: ID_BUS=%s (not USB).", node, bus))
 			continue
 		}
+		// ID_BUS is not enough: udev's hidraw rules import usb_id whenever *any*
+		// ancestor is USB, so a Bluetooth HID paired to a USB dongle reports
+		// ID_BUS=usb and the dongle's VID:PID. The HID device directory names
+		// the real transport, and only BUS_USB may be granted by VID:PID.
+		if report.HIDBus != "" && report.HIDBus != busUSB {
+			result.Diagnostics = append(result.Diagnostics, fmt.Sprintf("Skipping %s: HID bus %s, not USB; a VID:PID rule would grant every device behind the same adapter.", node, busName(report.HIDBus)))
+			continue
+		}
 		pathKey := report.USBParent
 		if pathKey == "" {
 			pathKey = physicalKey(report.Properties["DEVPATH"])
@@ -180,6 +190,9 @@ func (s *Scanner) inspect(node string) NodeReport {
 		return r
 	}
 	r.ResolvedDevice = resolved
+	if m := hidDeviceDir.FindStringSubmatch(filepath.Base(resolved)); m != nil {
+		r.HIDBus = strings.ToLower(m[1])
+	}
 	parent, attrs, err := findUSBParent(resolved)
 	if err != nil {
 		r.FallbackError = err.Error()
@@ -194,6 +207,22 @@ func (s *Scanner) inspect(node string) NodeReport {
 	}
 	r.Capabilities = readCapabilities(resolved)
 	return r
+}
+
+// The kernel names a HID device directory BUS:VID:PID.INSTANCE, where BUS is
+// the hid.h BUS_* code: 0003 USB, 0005 Bluetooth, 0018 I2C.
+const busUSB = "0003"
+
+var hidDeviceDir = regexp.MustCompile(`^([0-9A-Fa-f]{4}):[0-9A-Fa-f]{4}:[0-9A-Fa-f]{4}\.[0-9A-Fa-f]+$`)
+
+func busName(bus string) string {
+	switch bus {
+	case "0005":
+		return "bluetooth"
+	case "0018":
+		return "i2c"
+	}
+	return "0x" + bus
 }
 
 func normalizeMaybe(vid, pid string) (string, string, error) {
@@ -265,6 +294,11 @@ func readCapabilities(root string) Capabilities {
 	return c
 }
 
+// usbInterface matches a USB interface directory such as 1-2:1.3 or
+// 1-5.3.1:1.0. Matching a bare ":" would also match the PCI addresses that
+// every DEVPATH starts with, collapsing the whole machine into one key.
+var usbInterface = regexp.MustCompile(`^[0-9]+-[0-9.]+:[0-9]+\.[0-9]+$`)
+
 func physicalKey(devpath string) string {
 	// Trim known interface descendants. The result is diagnostic/dedup data,
 	// not a reconstructed sysfs path, so unknown layouts remain intact.
@@ -275,7 +309,7 @@ func physicalKey(devpath string) string {
 	}
 	parts := strings.Split(devpath, "/")
 	for i, p := range parts {
-		if strings.Contains(p, ":") { // USB interface (for example 1-2:1.3)
+		if usbInterface.MatchString(p) {
 			return strings.Join(parts[:i], "/")
 		}
 	}

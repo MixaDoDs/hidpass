@@ -59,6 +59,11 @@ func (s Store) Save(f File) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create state directory %s: %w", dir, err)
 	}
+	// MkdirAll applies the caller's umask; `list` and `doctor` run unprivileged
+	// and must still be able to read what the root helper wrote.
+	if err := os.Chmod(dir, 0755); err != nil {
+		return fmt.Errorf("set permissions on %s: %w", dir, err)
+	}
 	b, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode state: %w", err)
@@ -111,8 +116,16 @@ func Validate(f *File) error {
 func Add(f *File, d model.AllowedDevice) bool {
 	for i := range f.Devices {
 		if f.Devices[i].ID() == d.ID() {
-			// Refresh descriptive metadata but retain the original timestamp.
+			// Refresh descriptive metadata but retain the original timestamp and
+			// whatever the new record does not know: `allow` of a disconnected
+			// device carries no name or category.
 			d.AddedAt = f.Devices[i].AddedAt
+			if d.Name == "" {
+				d.Name = f.Devices[i].Name
+			}
+			if d.Category == "" {
+				d.Category = f.Devices[i].Category
+			}
 			f.Devices[i] = d
 			return false
 		}

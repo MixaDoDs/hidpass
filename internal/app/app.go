@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"hidpass/internal/discovery"
@@ -117,7 +116,7 @@ func (a *App) scan(args []string) error {
 	fs.SetOutput(a.Err)
 	debug := fs.Bool("debug", false, "show udev and sysfs evidence for every node")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return helpOrError(err)
 	}
 	if fs.NArg() != 0 {
 		return errors.New("scan takes no positional arguments")
@@ -205,7 +204,7 @@ func (a *App) auto(args []string) error {
 	fs.SetOutput(a.Err)
 	yes := fs.Bool("yes", false, "allow every non-security device without prompting")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return helpOrError(err)
 	}
 	if fs.NArg() != 0 {
 		return errors.New("auto takes no positional arguments")
@@ -228,21 +227,44 @@ func (a *App) auto(args []string) error {
 			break
 		}
 	}
+	// A rule matches a VID:PID, not a port, so two identical devices share one
+	// decision. Asking about each of them separately would promise a per-device
+	// choice that the generated rule cannot honour.
+	instances := make(map[string]int)
+	for _, d := range r.Devices {
+		instances[d.ID()]++
+	}
 	reader := bufio.NewReader(a.In)
+	asked := make(map[string]bool)
 	var selected []model.AllowedDevice
 	for _, d := range r.Devices {
 		if d.Security {
 			fmt.Fprintf(a.Out, "Skip  %s [%-11s] %s (sensitive security device: %s)\n", d.ID(), d.Category, d.Name, d.SecurityWhy)
 			continue
 		}
+		if asked[d.ID()] {
+			continue
+		}
+		asked[d.ID()] = true
 		allow := *yes
 		if !*yes {
-			fmt.Fprintf(a.Out, "Allow %s [%s] %s? [Y/n] ", d.ID(), d.Category, d.Name)
+			shared := ""
+			if n := instances[d.ID()]; n > 1 {
+				shared = fmt.Sprintf(" (%d connected devices share this ID; one rule covers all of them)", n)
+			}
+			fmt.Fprintf(a.Out, "Allow %s [%s] %s%s? [Y/n] ", d.ID(), d.Category, d.Name, shared)
 			answer, readErr := reader.ReadString('\n')
 			if readErr != nil && !errors.Is(readErr, io.EOF) {
 				return fmt.Errorf("read confirmation: %w", readErr)
 			}
 			answer = strings.ToLower(strings.TrimSpace(answer))
+			// An empty line is the [Y/n] default, but end of input is not an
+			// answer: without this, `hidpass auto </dev/null` would grant access
+			// to every device without anyone confirming anything.
+			if answer == "" && errors.Is(readErr, io.EOF) {
+				fmt.Fprintln(a.Out)
+				return errors.New("standard input ended before an answer; nothing was changed (use `hidpass auto --yes` for unattended runs)")
+			}
 			allow = answer == "" || answer == "y" || answer == "yes"
 		}
 		if allow {
@@ -264,7 +286,7 @@ func (a *App) allow(args []string) error {
 	if err != nil {
 		return err
 	}
-	d := model.AllowedDevice{VID: vid, PID: pid, Name: "Explicitly allowed USB HID", Category: "other-hid"}
+	d := model.AllowedDevice{VID: vid, PID: pid}
 	// Scan only enriches presentation metadata. Explicit allow must still work
 	// when the device is disconnected or udevadm is unavailable.
 	if r, scanErr := a.Scanner.Scan(); scanErr == nil {
@@ -350,6 +372,9 @@ func (a *App) performPrivileged(args []string) error {
 	if len(args) == 0 {
 		return errors.New("missing privileged operation")
 	}
+	// sudo without secure_path forwards the caller's PATH, which would decide
+	// which "udevadm" this root process executes.
+	os.Setenv("PATH", "/usr/sbin:/usr/bin:/sbin:/bin")
 	switch args[0] {
 	case "add":
 		if len(args) != 2 {
@@ -397,6 +422,7 @@ func (a *App) performPrivileged(args []string) error {
 		}
 		if removed {
 			fmt.Fprintf(a.Out, "Removed %s.\n", vid+":"+pid)
+			fmt.Fprintln(a.Out, "Access already granted to a connected node stays until the device is reconnected: udev only re-applies uaccess, it never revokes it.")
 		} else {
 			fmt.Fprintf(a.Out, "%s was not configured; rules were rebuilt unchanged.\n", vid+":"+pid)
 		}
@@ -513,6 +539,15 @@ func valueOr(value, fallback string) string {
 	return value
 }
 
+// helpOrError keeps `hidpass scan --help` from exiting 1: flag already printed
+// the usage text, so there is nothing left to report.
+func helpOrError(err error) error {
+	if errors.Is(err, flag.ErrHelp) {
+		return nil
+	}
+	return err
+}
+
 func errorText(err error) string {
 	if err == nil {
 		return ""
@@ -525,14 +560,4 @@ func elevationError(err error) error {
 		return errors.New("authorization was cancelled; configuration was not changed")
 	}
 	return err
-}
-
-// Keep output deterministic if future doctor probes use maps.
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }

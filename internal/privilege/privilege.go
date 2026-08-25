@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 type Method string
@@ -118,6 +119,11 @@ func ValidateExecutableForElevation(path string, euid int) error {
 	}
 	if info.Mode()&os.ModeSetuid != 0 {
 		return fmt.Errorf("refusing setuid hidpass binary %s; remove the setuid bit and use pkexec/sudo", path)
+	}
+	// Handing a binary owned by a third user to pkexec/sudo would let that user
+	// rewrite it and inherit the root privileges this invocation authenticates.
+	if st, ok := info.Sys().(*syscall.Stat_t); ok && int(st.Uid) != 0 && int(st.Uid) != euid {
+		return fmt.Errorf("cannot elevate executable %s: it is owned by uid %d, neither root nor you", path, st.Uid)
 	}
 	return nil
 }

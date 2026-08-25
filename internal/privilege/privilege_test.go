@@ -76,3 +76,15 @@ func TestWritableOrSetuidExecutableIsRejected(t *testing.T) {
 		t.Fatal("setuid executable was accepted")
 	}
 }
+
+func TestForeignOwnedExecutableIsRejected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hidpass")
+	if err := os.WriteFile(path, []byte("test"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// The file belongs to this uid, so a caller claiming to be somebody else is
+	// exactly the "owned by a third user" case pkexec must not be handed.
+	if err := ValidateExecutableForElevation(path, os.Geteuid()+1); err == nil {
+		t.Fatal("executable owned by another user was accepted")
+	}
+}
