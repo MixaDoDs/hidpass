@@ -75,7 +75,7 @@ func TestPrivilegedAddWritesStateRulesAndReloads(t *testing.T) {
 	if err != nil || !strings.Contains(string(b), `TAG+="uaccess"`) {
 		t.Fatalf("rules %q err %v", b, err)
 	}
-	if len(calls) != 2 || !strings.Contains(calls[0], "--reload-rules") || !strings.HasSuffix(calls[1], "trigger") {
+	if len(calls) != 2 || !strings.Contains(calls[0], "--reload-rules") || !strings.Contains(calls[1], "trigger --subsystem-match=hidraw") {
 		t.Fatalf("calls %#v", calls)
 	}
 	if !strings.Contains(out.String(), "physically reconnect") {

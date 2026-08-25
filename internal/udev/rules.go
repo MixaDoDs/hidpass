@@ -93,7 +93,9 @@ func (m Manager) Reload() error {
 	if m.Run == nil {
 		return fmt.Errorf("udev command runner is nil")
 	}
-	for _, args := range [][]string{{"control", "--reload-rules"}, {"trigger"}} {
+	// Trigger only hidraw: a bare `udevadm trigger` re-emits uevents for every
+	// device on the system, which is needlessly disruptive on a desktop.
+	for _, args := range [][]string{{"control", "--reload-rules"}, {"trigger", "--subsystem-match=hidraw"}} {
 		out, err := m.Run("udevadm", args...)
 		if err != nil {
 			return fmt.Errorf("udevadm %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
