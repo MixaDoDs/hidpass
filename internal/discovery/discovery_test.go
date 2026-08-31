@@ -277,3 +277,39 @@ func TestBluetoothHIDIsNotAttributedToItsUSBAdapter(t *testing.T) {
 		t.Fatalf("diagnostics %#v", r.Diagnostics)
 	}
 }
+
+func TestEmptyIDBUSWithoutUSBParentIsSkipped(t *testing.T) {
+	f := newFixture(t)
+	if err := os.WriteFile(filepath.Join(f.dev, "hidraw0"), nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeRunner{properties: map[string]string{
+		filepath.Join(f.dev, "hidraw0"): "ID_VENDOR_ID=1234\nID_MODEL_ID=5678\n",
+	}, errors: map[string]error{}}
+	r, err := f.scanner(runner).Scan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Devices) != 0 {
+		t.Fatalf("mystery bus treated as USB: %#v", r.Devices)
+	}
+	joined := strings.Join(r.Diagnostics, "\n")
+	if !strings.Contains(joined, "ID_BUS") {
+		t.Fatalf("diagnostics %#v", r.Diagnostics)
+	}
+}
+
+func TestEmptyIDBUSWithUSBSysfsParentIsAccepted(t *testing.T) {
+	f := newFixture(t)
+	f.addNode(t, "hidraw3", "pci/usb1/1-2", "1-2:1.0", map[string]string{
+		"idVendor": "373E", "idProduct": "001E", "manufacturer": "LAMZU", "product": "MAYA X 8K Receiver",
+	}, map[string]string{"key": bitmap(0x110), "rel": bitmap(0, 1)})
+	runner := &fakeRunner{properties: map[string]string{filepath.Join(f.dev, "hidraw3"): "DEVPATH=/devices/...\n"}, errors: map[string]error{}}
+	r, err := f.scanner(runner).Scan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Devices) != 1 || r.Devices[0].ID() != "373e:001e" {
+		t.Fatalf("devices %#v diagnostics %#v", r.Devices, r.Diagnostics)
+	}
+}

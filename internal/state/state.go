@@ -10,7 +10,7 @@ import (
 	"sort"
 	"time"
 
-	"hidpass/internal/model"
+	"github.com/MixaDoDs/hidpass/internal/model"
 )
 
 const CurrentVersion = 1
@@ -145,4 +145,24 @@ func Remove(f *File, id string) bool {
 		}
 	}
 	return false
+}
+
+func (s Store) Remove() error {
+	if err := os.Remove(s.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove state %s: %w", s.Path, err)
+	}
+	dir := filepath.Dir(s.Path)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("read state directory %s: %w", dir, err)
+	}
+	if len(entries) == 0 {
+		if err := os.Remove(dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove empty state directory %s: %w", dir, err)
+		}
+	}
+	return nil
 }

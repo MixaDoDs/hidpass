@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/software/polkit/policyconfig-1.dtd">
+<policyconfig>
+  <vendor>hidpass</vendor>
+  <vendor_url>https://github.com/MixaDoDs/hidpass</vendor_url>
+  <icon_name>security-high</icon_name>
+  <action id="org.hidpass.apply">
+    <description>Write hidpass udev hidraw rules</description>
+    <description xml:lang="ru">Запись udev-правил hidpass для hidraw</description>
+    <message>Authentication is required for hidpass to write udev hidraw access rules</message>
+    <message xml:lang="ru">hidpass записывает udev-правила доступа к hidraw. Требуется подтверждение.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/hidpass</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+</policyconfig>

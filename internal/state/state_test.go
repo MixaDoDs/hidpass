@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"hidpass/internal/model"
+	"github.com/MixaDoDs/hidpass/internal/model"
 )
 
 func TestStoreRoundTripAndMutation(t *testing.T) {
@@ -62,5 +62,23 @@ func TestLoadRejectsAnUnsupportedVersion(t *testing.T) {
 	}
 	if _, err := (Store{Path: path}).Load(); err == nil {
 		t.Fatal("a future state version was accepted")
+	}
+}
+
+func TestStoreRemoveDeletesFileAndEmptyDir(t *testing.T) {
+	root := t.TempDir()
+	s := Store{Path: filepath.Join(root, "hidpass", "devices.json")}
+	f := File{Version: CurrentVersion, Devices: []model.AllowedDevice{{VID: "373e", PID: "001e"}}}
+	if err := s.Save(f); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Remove(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(s.Path); !os.IsNotExist(err) {
+		t.Fatalf("state file still present: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(s.Path)); !os.IsNotExist(err) {
+		t.Fatalf("empty state dir still present: %v", err)
 	}
 }

@@ -24,6 +24,7 @@ KERNEL=="hidraw*", ATTRS{idVendor}=="373e", ATTRS{idProduct}=="001e", TAG+="uacc
 | `hidpass allow VID:PID` | Явно добавить устройство |
 | `hidpass remove VID:PID` | Удалить устройство |
 | `hidpass apply` | Пересобрать rules и перезагрузить udev |
+| `hidpass uninstall` | Удалить rules и `/etc/hidpass/devices.json` |
 | `hidpass doctor` | Проверить окружение |
 | `hidpass version` | Показать версию |
 
@@ -32,6 +33,11 @@ KERNEL=="hidraw*", ATTRS{idVendor}=="373e", ATTRS{idProduct}=="001e", TAG+="uacc
 сторону: udev заново применяет `uaccess`, но никогда его не снимает, поэтому
 после `remove` уже выданный ACL сохраняется на подключённой ноде до
 переподключения устройства.
+
+`auto` для клавиатур и мышей спрашивает `[y/N]` и печатает предупреждение:
+hidraw на клавиатуре — сырые репорты на весь seat (кейлоггинг/инъекция).
+`--yes` всё равно может их добавить, но предупреждение остаётся. FIDO/security
+ключи в `auto` пропускаются; `allow VID:PID` — явный override.
 
 ## Обнаружение и дедупликация
 
@@ -44,6 +50,10 @@ udevadm info --query=property --name=/dev/hidrawN
 Если udev не сообщает VID/PID, программа разрешает
 `/sys/class/hidraw/hidrawN/device` и поднимается вверх по sysfs до родителя с
 `idVendor` и `idProduct`.
+
+Пустой `ID_BUS` **не** считается USB сам по себе. Устройство принимается как
+USB, если `ID_BUS=usb` или найден USB-родитель в sysfs. Иначе узел
+пропускается как неизвестная шина.
 
 `hidpass` не обходит `/sys/bus/usb/devices`: там много symlink-ов, которые
 `filepath.WalkDir` не посещает. Несколько HID-интерфейсов одного физического
@@ -69,51 +79,80 @@ keyboard  mouse  streamdeck  touchpad  tablet  joystick  other-hid
 старшим словом вперёд, поэтому нулевой бит лежит в самом правом поле.
 
 Неизвестные `other-hid` требуют подтверждения. Security-устройства
-(YubiKey/FIDO, Ledger, Trezor, Nitrokey и похожие) пропускаются в `auto`,
-включая `auto --yes`; осознанный `allow VID:PID` остаётся доступен.
+(YubiKey/FIDO, Ledger, Trezor, Nitrokey, Google Titan, Feitian и похожие)
+пропускаются в `auto`, включая `auto --yes`; осознанный `allow VID:PID`
+остаётся доступен. Привилегированный helper повторно проверяет deny-list на
+пути `add`/`auto`, чтобы подделанный payload не протащил security-ключ.
 
 ## Привилегии
 
 Сканирование и чтение работают от обычного пользователя. Только операции
-`add`, `remove` и `apply` запускаются через `pkexec`, а при его отсутствии —
-через `sudo`. Бинарник не является setuid-root.
+`add`, `allow`, `remove`, `apply` и `uninstall` запускаются через `pkexec`,
+а при его отсутствии — через `sudo`. Бинарник не является setuid-root.
 
 Проверяются обычный тип файла, отсутствие setuid и отсутствие
-group/world-writable разрешений. Владельцем должен быть `root` или сам
-вызывающий пользователь: бинарник третьего пользователя тот может переписать и
-получить root через чужую аутентификацию. Пользовательский бинарник `0755`
-допустим; его не нужно делать владельцем `root`.
+group/world-writable разрешений на самом файле, а также отсутствие
+world-writable каталога (в том числе бинарник прямо в `/tmp`). Владельцем
+должен быть `root` или сам вызывающий пользователь: бинарник третьего
+пользователя тот может переписать и получить root через чужую аутентификацию.
+Пользовательский бинарник `0755` в своём каталоге допустим для разработки;
+доверенный путь — root-owned `/usr/local/bin/hidpass`.
 
 Привилегированный помощник задаёт собственный `PATH`: `sudo` без
 `secure_path` передаёт `PATH` вызывающего, а от него зависит, какой `udevadm`
 выполнится от root.
+
+Polkit-действие `org.hidpass.apply` описывает, что hidpass записывает
+udev-правила hidraw. Файл политики: `contrib/polkit/org.hidpass.policy`.
 
 ## Файлы системы
 
 ```text
 /etc/hidpass/devices.json
 /etc/udev/rules.d/70-hidpass.rules
+/usr/share/polkit-1/actions/org.hidpass.policy
 ```
+
+Правила пишутся атомарно (temp + rename, режим `0644`) в
+`/etc/udev/rules.d/`, **не** в `/run/udev/rules.d`. После перезагрузки udev
+сам загружает `/etc/udev/rules.d`, поэтому правила не пропадают, пока файл
+на месте. hidpass не ставит tmpfiles.d и не нужен systemd oneshot только
+ради persistence.
+
+Установка конфигурации транзакционная: сначала генерируются rules, затем
+записываются rules, затем state. Если запись rules не удалась, `devices.json`
+не уезжает вперёд.
 
 После изменения правил выполняются:
 
 ```bash
 udevadm control --reload-rules
-udevadm trigger --subsystem-match=hidraw
+udevadm trigger --subsystem-match=hidraw --action=change
 ```
 
 `trigger` ограничен подсистемой `hidraw`: без фильтра udev переотправляет
-uevent для всех устройств системы.
+uevent для всех устройств системы. `--action=change` переприменяет правила
+без полного re-enumerate.
+
+`hidpass doctor` проверяет, что rules-файл в `/etc` (не в `/run`), что он
+есть, если устройства уже настроены, и предупреждает, если logind/seat
+скорее всего отсутствует или у `/dev/hidraw*` нет ACL `uaccess` при
+существующих правилах.
+
+`hidpass uninstall` удаляет rules-файл, `devices.json` и пустой
+`/etc/hidpass`, затем делает тот же узкий trigger.
 
 ## Разработка
 
 ```bash
 go test ./...
 go vet ./...
-go build -trimpath -o hidpass ./cmd/hidpass
+make build
+./bin/hidpass version
 ```
 
 Тесты покрывают parsing `udevadm`, sysfs fallback, symlink resolution,
-дедупликацию, нормализацию VID/PID, генерацию rules, state, privilege logic,
-классификацию и исключение security-устройств. Есть regression-тест для
-старой ошибки обхода symlink-ов в `/sys/bus/usb/devices`.
+дедупликацию, пустой `ID_BUS`, нормализацию VID/PID, генерацию rules,
+узкий trigger, транзакционный install, state, privilege logic,
+классификацию, расширенный security VID deny-list, default-deny для
+клавиатур в `auto` и uninstall.

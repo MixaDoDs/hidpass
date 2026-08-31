@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"hidpass/internal/app"
+	"github.com/MixaDoDs/hidpass/internal/app"
 )
 
 func main() {

@@ -109,9 +109,10 @@ func has(bitmaps []string, bit int) bool {
 func SecurityDevice(vid, vendor, product string) (bool, string) {
 	s := strings.ToLower(strings.Join([]string{vendor, product}, " "))
 	terms := []string{
-		"yubikey", "yubico", "fido", "security key", "security_key",
+		"yubikey", "yubico", "fido", "u2f", "fido2", "security key", "security_key",
 		"ledger", "trezor", "nitrokey", "onlykey", "solo key", "solokey",
-		"hardware wallet", "hardware_wallet",
+		"hardware wallet", "hardware_wallet", "titan security", "feitian",
+		"jacarta", "hyperfido",
 	}
 	for _, term := range terms {
 		if strings.Contains(s, term) {
@@ -119,9 +120,11 @@ func SecurityDevice(vid, vendor, product string) (bool, string) {
 		}
 	}
 	// Well-known vendor IDs are an additional safeguard when product strings
-	// are absent or generic. 1050 is Yubico; 2c97 is Ledger; 1209 covers many
-	// open hardware devices, so it is intentionally not excluded wholesale.
-	switch strings.ToLower(vid) {
+	// are absent or generic. 1209 (pid.codes), 0483 (STMicro), 1d50 (OpenMoko)
+	// and 1fc9 (NXP) cover many non-security products, so they are not
+	// excluded wholesale. Google 18d1 also covers some non-key products;
+	// auto-skip is conservative, and explicit `allow` still works.
+	switch strings.ToLower(strings.TrimSpace(vid)) {
 	case "1050":
 		return true, "Yubico vendor ID"
 	case "2c97":
@@ -130,6 +133,30 @@ func SecurityDevice(vid, vendor, product string) (bool, string) {
 		return true, "Nitrokey vendor ID"
 	case "534c":
 		return true, "Trezor vendor ID"
+	case "18d1":
+		return true, "Google Titan vendor ID"
+	case "096e":
+		return true, "Feitian vendor ID"
+	case "2581":
+		return true, "Plug-up/Happlink vendor ID"
+	case "2ccf":
+		return true, "Hypersecu vendor ID"
+	case "311f":
+		return true, "eWBM/TrustKey vendor ID"
+	case "349e":
+		return true, "Token2 vendor ID"
+	case "32a3":
+		return true, "GoTrust vendor ID"
+	case "1a44":
+		return true, "VASCO vendor ID"
+	case "1e0d":
+		return true, "Neowave vendor ID"
+	case "24dc":
+		return true, "JaCarta vendor ID"
+	case "2abe":
+		return true, "Bluink vendor ID"
+	case "1ea8":
+		return true, "Excelsecu vendor ID"
 	}
 	return false, ""
 }

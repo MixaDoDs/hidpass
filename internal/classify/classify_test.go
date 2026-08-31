@@ -53,9 +53,23 @@ func TestSecurityDevice(t *testing.T) {
 		{"2c97", "", "Nano"},
 		{"20a0", "", "Generic"},
 		{"534c", "", "Generic"},
+		{"18d1", "", "Generic"},
+		{"096e", "", "Generic"},
+		{"2581", "", "Generic"},
+		{"2ccf", "", "Generic"},
+		{"311f", "", "Generic"},
+		{"349e", "", "Generic"},
+		{"32a3", "", "Generic"},
+		{"1a44", "", "Generic"},
+		{"1e0d", "", "Generic"},
+		{"24dc", "", "Generic"},
+		{"2abe", "", "Generic"},
+		{"1ea8", "", "Generic"},
 		{"1209", "Nitrokey", "Nitrokey 3"},
 		{"", "SatoshiLabs", "Trezor Model T"},
 		{"", "", "FIDO Security Key"},
+		{"", "Google", "Titan Security Key"},
+		{"", "Feitian", "BioPass"},
 	} {
 		if ok, _ := SecurityDevice(tc.vid, tc.vendor, tc.product); !ok {
 			t.Errorf("expected exclusion for %#v", tc)
@@ -63,6 +77,9 @@ func TestSecurityDevice(t *testing.T) {
 	}
 	if ok, why := SecurityDevice("373e", "LAMZU", "MAYA X"); ok {
 		t.Fatalf("normal mouse excluded: %s", why)
+	}
+	if ok, why := SecurityDevice("1209", "Some", "Gadget"); ok {
+		t.Fatalf("pid.codes excluded wholesale: %s", why)
 	}
 }
 

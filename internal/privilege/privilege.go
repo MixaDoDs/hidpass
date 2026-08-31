@@ -84,19 +84,16 @@ func (e *Escalator) Do(args ...string) error {
 	return nil
 }
 
-// VerifyRootExecutable validates the already-running helper image. It may be
-// user-owned: pkexec/sudo grant root only for an authenticated invocation.
-// hidpass never needs or accepts the setuid bit.
-func VerifyRootExecutable(path string) error {
+func inspectExecutable(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {
-		return fmt.Errorf("stat privileged executable: %w", err)
+		return fmt.Errorf("stat executable %s: %w", path, err)
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("refusing privileged mode: executable %s is not a regular file", path)
+		return fmt.Errorf("executable %s is not a regular file", path)
 	}
 	if info.Mode().Perm()&0022 != 0 {
-		return fmt.Errorf("refusing privileged mode: executable %s is group/world writable; run chmod 0755 %s", path, path)
+		return fmt.Errorf("executable %s is group/world writable; run chmod 0755 %s", path, path)
 	}
 	if info.Mode()&os.ModeSetuid != 0 {
 		return fmt.Errorf("refusing setuid hidpass binary %s; remove the setuid bit and use pkexec/sudo", path)
@@ -104,26 +101,68 @@ func VerifyRootExecutable(path string) error {
 	return nil
 }
 
+// VerifyRootExecutable validates the already-running helper image. It may be
+// user-owned: pkexec/sudo grant root only for an authenticated invocation.
+// hidpass never needs or accepts the setuid bit.
+func VerifyRootExecutable(path string) error {
+	if err := inspectExecutable(path); err != nil {
+		return fmt.Errorf("refusing privileged mode: %w", err)
+	}
+	return nil
+}
+
 // ValidateExecutableForElevation applies the same safety check before asking
-// pkexec/sudo. A normal user-owned mode-0755 development binary is valid.
+// pkexec/sudo. A normal user-owned mode-0755 development binary is valid if
+// it is not sitting in a world-writable directory. The intended trusted path
+// is a root-owned install such as /usr/local/bin/hidpass (not user-writable).
+// hidpass does not use setuid.
+//
+// euid is the calling process effective UID: directory checks are skipped
+// when already running as root (the helper uses VerifyRootExecutable).
 func ValidateExecutableForElevation(path string, euid int) error {
+	if err := inspectExecutable(path); err != nil {
+		return fmt.Errorf("cannot elevate: %w", err)
+	}
+	if euid == 0 {
+		return nil
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return fmt.Errorf("stat executable before elevation: %w", err)
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("cannot elevate executable %s: it is not a regular file", path)
-	}
-	if info.Mode().Perm()&0022 != 0 {
-		return fmt.Errorf("cannot elevate executable %s because it is group/world writable; run chmod 0755 %s", path, path)
-	}
-	if info.Mode()&os.ModeSetuid != 0 {
-		return fmt.Errorf("refusing setuid hidpass binary %s; remove the setuid bit and use pkexec/sudo", path)
 	}
 	// Handing a binary owned by a third user to pkexec/sudo would let that user
 	// rewrite it and inherit the root privileges this invocation authenticates.
 	if st, ok := info.Sys().(*syscall.Stat_t); ok && int(st.Uid) != 0 && int(st.Uid) != euid {
 		return fmt.Errorf("cannot elevate executable %s: it is owned by uid %d, neither root nor you", path, st.Uid)
+	}
+	return rejectUntrustedParents(path)
+}
+
+func rejectUntrustedParents(path string) error {
+	resolved := path
+	if r, err := filepath.EvalSymlinks(path); err == nil {
+		resolved = r
+	}
+	dir := filepath.Dir(resolved)
+	immediate := dir
+	for {
+		info, err := os.Stat(dir)
+		if err != nil {
+			return fmt.Errorf("cannot elevate %s: stat directory %s: %w", path, dir, err)
+		}
+		worldWritable := info.Mode().Perm()&0002 != 0
+		sticky := info.Mode()&os.ModeSticky != 0
+		// Sticky world-writable dirs such as /tmp are acceptable as ancestors
+		// of a private subdirectory, but the binary itself must not live in
+		// a world-writable directory (anyone could replace a /tmp/hidpass).
+		if worldWritable && (!sticky || dir == immediate) {
+			return fmt.Errorf("cannot elevate %s: directory %s is world-writable; install hidpass to a root-owned path such as /usr/local/bin", path, dir)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
 	}
 	return nil
 }

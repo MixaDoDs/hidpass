@@ -88,3 +88,23 @@ func TestForeignOwnedExecutableIsRejected(t *testing.T) {
 		t.Fatal("executable owned by another user was accepted")
 	}
 }
+
+func TestWorldWritableDirectoryIsRejected(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "open")
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0777); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "hidpass")
+	if err := os.WriteFile(path, []byte("test"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateExecutableForElevation(path, os.Geteuid()); err == nil {
+		t.Fatal("world-writable directory was accepted")
+	}
+	if err := ValidateExecutableForElevation(path, 0); err != nil {
+		t.Fatalf("root euid should skip directory checks: %v", err)
+	}
+}

@@ -15,8 +15,8 @@ import (
 	"sort"
 	"strings"
 
-	"hidpass/internal/classify"
-	"hidpass/internal/model"
+	"github.com/MixaDoDs/hidpass/internal/classify"
+	"github.com/MixaDoDs/hidpass/internal/model"
 )
 
 type Runner interface {
@@ -126,9 +126,18 @@ func (s *Scanner) Scan() (Result, error) {
 			result.Diagnostics = append(result.Diagnostics, fmt.Sprintf("Found %s, but neither udev nor sysfs exposed a valid USB VID/PID.", node))
 			continue
 		}
-		if bus := strings.ToLower(report.Properties["ID_BUS"]); bus != "" && bus != "usb" {
+		bus := strings.ToLower(strings.TrimSpace(report.Properties["ID_BUS"]))
+		switch {
+		case bus != "" && bus != "usb":
 			result.Diagnostics = append(result.Diagnostics, fmt.Sprintf("Skipping %s: ID_BUS=%s (not USB).", node, bus))
 			continue
+		case bus == "":
+			// Missing ID_BUS is not assumed to be USB. A sysfs parent with
+			// USB idVendor/idProduct is acceptable evidence.
+			if report.USBParent == "" {
+				result.Diagnostics = append(result.Diagnostics, fmt.Sprintf("Skipping %s: ID_BUS is empty and no USB sysfs parent was found.", node))
+				continue
+			}
 		}
 		// ID_BUS is not enough: udev's hidraw rules import usb_id whenever *any*
 		// ancestor is USB, so a Bluetooth HID paired to a USB dongle reports
