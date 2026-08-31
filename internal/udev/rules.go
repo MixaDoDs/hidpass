@@ -18,11 +18,12 @@ const (
 	RulesFileName    = "70-hidpass.rules"
 )
 
-// ReloadCommands reloads rules and re-applies them only to hidraw nodes.
+// ReloadCommands reloads rules and re-applies them to hidraw and usb nodes.
 // A bare `udevadm trigger` would re-enumerate the whole device tree.
 var ReloadCommands = [][]string{
 	{"control", "--reload-rules"},
 	{"trigger", "--subsystem-match=hidraw", "--action=change"},
+	{"trigger", "--subsystem-match=usb", "--action=change"},
 }
 
 func Generate(devices []model.AllowedDevice) ([]byte, error) {
@@ -37,12 +38,13 @@ func Generate(devices []model.AllowedDevice) ([]byte, error) {
 	sort.Slice(copyOf, func(i, j int) bool { return copyOf[i].ID() < copyOf[j].ID() })
 	var b bytes.Buffer
 	b.WriteString(Header)
-	b.WriteString("# Grants the active local seat user access; never grants global mode 0666.\n")
+	b.WriteString("# Seat uaccess plus MODE on the granted VID:PID only. Chromium WebHID ignores POSIX ACLs.\n")
 	for _, d := range copyOf {
 		if d.Name != "" {
 			fmt.Fprintf(&b, "# %s [%s]\n", safeComment(d.Name), safeComment(d.Category))
 		}
-		fmt.Fprintf(&b, "KERNEL==\"hidraw*\", ATTRS{idVendor}==\"%s\", ATTRS{idProduct}==\"%s\", TAG+=\"uaccess\"\n", d.VID, d.PID)
+		fmt.Fprintf(&b, "KERNEL==\"hidraw*\", SUBSYSTEM==\"hidraw\", ATTRS{idVendor}==\"%s\", ATTRS{idProduct}==\"%s\", MODE=\"0666\", TAG+=\"uaccess\", TAG+=\"udev-acl\"\n", d.VID, d.PID)
+		fmt.Fprintf(&b, "SUBSYSTEM==\"usb\", ATTR{idVendor}==\"%s\", ATTR{idProduct}==\"%s\", MODE=\"0664\", TAG+=\"uaccess\"\n", d.VID, d.PID)
 	}
 	return b.Bytes(), nil
 }
@@ -124,8 +126,8 @@ func (m Manager) Reload() error {
 	if m.Run == nil {
 		return fmt.Errorf("udev command runner is nil")
 	}
-	// Trigger only hidraw: a bare `udevadm trigger` re-emits uevents for every
-	// device on the system, which is needlessly disruptive on a desktop.
+	// Trigger only hidraw and usb: a bare `udevadm trigger` re-emits uevents
+	// for every device on the system, which is needlessly disruptive.
 	for _, args := range ReloadCommands {
 		out, err := m.Run("udevadm", args...)
 		if err != nil {

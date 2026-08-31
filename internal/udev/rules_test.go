@@ -18,17 +18,24 @@ func TestGenerateRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(b)
-	want := `KERNEL=="hidraw*", ATTRS{idVendor}=="373e", ATTRS{idProduct}=="001e", TAG+="uaccess"`
+	want := `KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="373e", ATTRS{idProduct}=="001e", MODE="0666", TAG+="uaccess", TAG+="udev-acl"`
 	if !strings.Contains(s, want) {
-		t.Fatalf("missing rule %q in:\n%s", want, s)
+		t.Fatalf("missing hidraw rule %q in:\n%s", want, s)
 	}
-	for _, line := range strings.Split(s, "\n") {
-		if !strings.HasPrefix(line, "#") && (strings.Contains(line, "0666") || strings.Contains(line, "MODE=")) {
-			t.Fatalf("unsafe global mode in rules:\n%s", s)
-		}
+	usb := `SUBSYSTEM=="usb", ATTR{idVendor}=="373e", ATTR{idProduct}=="001e", MODE="0664", TAG+="uaccess"`
+	if !strings.Contains(s, usb) {
+		t.Fatalf("missing usb rule %q in:\n%s", usb, s)
 	}
 	if strings.Contains(s, "LAMZU\nMAYA") {
 		t.Fatal("comment injection was not sanitized")
+	}
+	for _, line := range strings.Split(s, "\n") {
+		if strings.HasPrefix(line, "#") || line == "" {
+			continue
+		}
+		if strings.Contains(line, "MODE=") && !strings.Contains(line, "ATTRS{idVendor}") && !strings.Contains(line, "ATTR{idVendor}") {
+			t.Fatalf("MODE without VID/PID:\n%s", s)
+		}
 	}
 }
 
@@ -68,17 +75,17 @@ func TestWriteAtomicModeReloadScopeAndRemove(t *testing.T) {
 	if err := m.Reload(); err != nil {
 		t.Fatal(err)
 	}
-	if len(calls) != 2 {
+	if len(calls) != 3 {
 		t.Fatalf("calls %#v", calls)
 	}
 	if calls[0] != "udevadm control --reload-rules" {
 		t.Fatalf("reload = %q", calls[0])
 	}
 	if calls[1] != "udevadm trigger --subsystem-match=hidraw --action=change" {
-		t.Fatalf("trigger = %q", calls[1])
+		t.Fatalf("trigger hidraw = %q", calls[1])
 	}
-	if strings.HasSuffix(calls[1], " trigger") {
-		t.Fatal("unfiltered udevadm trigger")
+	if calls[2] != "udevadm trigger --subsystem-match=usb --action=change" {
+		t.Fatalf("trigger usb = %q", calls[2])
 	}
 	if err := m.Remove(); err != nil {
 		t.Fatal(err)

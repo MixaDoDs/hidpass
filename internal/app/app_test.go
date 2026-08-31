@@ -95,11 +95,8 @@ func TestPrivilegedAddWritesStateRulesAndReloads(t *testing.T) {
 	if err != nil || !strings.Contains(string(b), `TAG+="uaccess"`) {
 		t.Fatalf("rules %q err %v", b, err)
 	}
-	if len(calls) != 2 || !strings.Contains(calls[0], "--reload-rules") || !strings.Contains(calls[1], "trigger --subsystem-match=hidraw") {
+	if len(calls) != 3 || !strings.Contains(calls[0], "--reload-rules") || calls[1] != "udevadm trigger --subsystem-match=hidraw --action=change" || calls[2] != "udevadm trigger --subsystem-match=usb --action=change" {
 		t.Fatalf("calls %#v", calls)
-	}
-	if calls[1] != "udevadm trigger --subsystem-match=hidraw --action=change" {
-		t.Fatalf("expected narrow hidraw trigger, got %#v", calls)
 	}
 	if strings.HasSuffix(calls[1], "trigger") && !strings.Contains(calls[1], "--subsystem-match=hidraw") {
 		t.Fatalf("unfiltered trigger: %#v", calls)
@@ -184,7 +181,7 @@ func TestPrivilegedUninstallRemovesRulesAndState(t *testing.T) {
 	if _, err := os.Stat(filepath.Dir(a.Store.Path)); !os.IsNotExist(err) {
 		t.Fatalf("empty state dir still present: %v", err)
 	}
-	if len(calls) != 2 || calls[1] != "udevadm trigger --subsystem-match=hidraw --action=change" {
+	if len(calls) != 3 || calls[1] != "udevadm trigger --subsystem-match=hidraw --action=change" || calls[2] != "udevadm trigger --subsystem-match=usb --action=change" {
 		t.Fatalf("uninstall trigger %#v", calls)
 	}
 }
