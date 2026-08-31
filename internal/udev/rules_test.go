@@ -22,7 +22,7 @@ func TestGenerateRules(t *testing.T) {
 	if !strings.Contains(s, want) {
 		t.Fatalf("missing hidraw rule %q in:\n%s", want, s)
 	}
-	usb := `SUBSYSTEM=="usb", ATTR{idVendor}=="373e", ATTR{idProduct}=="001e", MODE="0664", TAG+="uaccess"`
+	usb := `SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="373e", ATTR{idProduct}=="001e", MODE="0666"`
 	if !strings.Contains(s, usb) {
 		t.Fatalf("missing usb rule %q in:\n%s", usb, s)
 	}

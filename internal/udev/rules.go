@@ -44,7 +44,7 @@ func Generate(devices []model.AllowedDevice) ([]byte, error) {
 			fmt.Fprintf(&b, "# %s [%s]\n", safeComment(d.Name), safeComment(d.Category))
 		}
 		fmt.Fprintf(&b, "KERNEL==\"hidraw*\", SUBSYSTEM==\"hidraw\", ATTRS{idVendor}==\"%s\", ATTRS{idProduct}==\"%s\", MODE=\"0666\", TAG+=\"uaccess\", TAG+=\"udev-acl\"\n", d.VID, d.PID)
-		fmt.Fprintf(&b, "SUBSYSTEM==\"usb\", ATTR{idVendor}==\"%s\", ATTR{idProduct}==\"%s\", MODE=\"0664\", TAG+=\"uaccess\"\n", d.VID, d.PID)
+		fmt.Fprintf(&b, "SUBSYSTEM==\"usb\", ENV{DEVTYPE}==\"usb_device\", ATTR{idVendor}==\"%s\", ATTR{idProduct}==\"%s\", MODE=\"0666\"\n", d.VID, d.PID)
 	}
 	return b.Bytes(), nil
 }
