@@ -18,12 +18,14 @@ const (
 	RulesFileName    = "70-hidpass.rules"
 )
 
-// ReloadCommands reloads rules and re-applies them to hidraw and usb nodes.
+// ReloadCommands reloads rules, re-applies them to hidraw and usb nodes, and
+// waits until udev has finished processing the generated change events.
 // A bare `udevadm trigger` would re-enumerate the whole device tree.
 var ReloadCommands = [][]string{
 	{"control", "--reload-rules"},
 	{"trigger", "--subsystem-match=hidraw", "--action=change"},
 	{"trigger", "--subsystem-match=usb", "--action=change"},
+	{"settle", "--timeout=5"},
 }
 
 func Generate(devices []model.AllowedDevice) ([]byte, error) {

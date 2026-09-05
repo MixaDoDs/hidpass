@@ -551,8 +551,8 @@ func (a *App) install(f state.File) error {
 }
 
 func (a *App) printReconnectNotice() {
-	fmt.Fprintln(a.Out, "udev rules reloaded and hidraw devices triggered.")
-	fmt.Fprintln(a.Out, "If access is not updated, physically reconnect the device/dongle; uaccess ACLs are not always refreshed by trigger alone.")
+	fmt.Fprintln(a.Out, "udev rules reloaded, hidraw devices triggered, and pending events settled.")
+	fmt.Fprintln(a.Out, "If access is still not updated, physically reconnect the device/dongle; some firmware resets expose a new HID interface.")
 }
 
 func (a *App) getenv(key string) string {

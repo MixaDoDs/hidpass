@@ -75,7 +75,7 @@ func TestWriteAtomicModeReloadScopeAndRemove(t *testing.T) {
 	if err := m.Reload(); err != nil {
 		t.Fatal(err)
 	}
-	if len(calls) != 3 {
+	if len(calls) != 4 {
 		t.Fatalf("calls %#v", calls)
 	}
 	if calls[0] != "udevadm control --reload-rules" {
@@ -86,6 +86,9 @@ func TestWriteAtomicModeReloadScopeAndRemove(t *testing.T) {
 	}
 	if calls[2] != "udevadm trigger --subsystem-match=usb --action=change" {
 		t.Fatalf("trigger usb = %q", calls[2])
+	}
+	if calls[3] != "udevadm settle --timeout=5" {
+		t.Fatalf("settle = %q", calls[3])
 	}
 	if err := m.Remove(); err != nil {
 		t.Fatal(err)

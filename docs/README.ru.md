@@ -28,8 +28,9 @@ KERNEL=="hidraw*", ATTRS{idVendor}=="373e", ATTRS{idProduct}=="001e", TAG+="uacc
 | `hidpass doctor` | Проверить окружение |
 | `hidpass version` | Показать версию |
 
-После reload/trigger иногда требуется физически переподключить устройство или
-донгл, чтобы ACL `uaccess` обновился. То же самое действует и в обратную
+После reload/trigger hidpass ждёт завершения очереди udev через `udevadm settle`.
+Иногда всё равно требуется физически переподключить устройство или донгл,
+если прошивка пересоздаёт HID-интерфейс. То же самое действует и в обратную
 сторону: udev заново применяет `uaccess`, но никогда его не снимает, поэтому
 после `remove` уже выданный ACL сохраняется на подключённой ноде до
 переподключения устройства.
@@ -128,6 +129,8 @@ udev-правила hidraw. Файл политики: `contrib/polkit/org.hidpa
 ```bash
 udevadm control --reload-rules
 udevadm trigger --subsystem-match=hidraw --action=change
+udevadm trigger --subsystem-match=usb --action=change
+udevadm settle --timeout=5
 ```
 
 `trigger` ограничен подсистемой `hidraw`: без фильтра udev переотправляет
